@@ -2598,7 +2598,14 @@ static const struct xtest_ciph_case ciph_cases[] = {
 			ciph_data_sm4_ctr_a252_out),
 };
 
-static void xtest_tee_test_4003(ADBG_Case_t *c)
+/*
+ * Drive one table of cipher cases. Split out from test 4003 so that tests
+ * covering a single algorithm can reuse it against their own table rather
+ * than adding to the mixed one 4003 runs.
+ */
+static void xtest_cipher_cases(ADBG_Case_t *c,
+			       const struct xtest_ciph_case *cases,
+			       size_t num_cases)
 {
 	TEEC_Session session = { };
 	TEE_OperationHandle op = TEE_HANDLE_NULL;
@@ -2617,17 +2624,17 @@ static void xtest_tee_test_4003(ADBG_Case_t *c)
 					&ret_orig)))
 		return;
 
-	for (n = 0; n < ARRAY_SIZE(ciph_cases); n++) {
+	for (n = 0; n < num_cases; n++) {
 		TEE_Attribute key_attr = { };
 		size_t key_size = 0;
 		size_t op_key_size = 0;
 
-		switch (ciph_cases[n].algo) {
+		switch (cases[n].algo) {
 		case TEE_ALG_SM4_CTR:
 		case TEE_ALG_SM4_CBC_NOPAD:
 		case TEE_ALG_SM4_ECB_NOPAD:
 			if (!ta_crypt_cmd_is_algo_supported(c, &session,
-				ciph_cases[n].algo, TEE_CRYPTO_ELEMENT_NONE)) {
+				cases[n].algo, TEE_CRYPTO_ELEMENT_NONE)) {
 				Do_ADBG_Log("SM4 not supported: skip subcase");
 				continue;
 			}
@@ -2637,38 +2644,38 @@ static void xtest_tee_test_4003(ADBG_Case_t *c)
 		}
 
 		Do_ADBG_BeginSubCase(c, "Cipher case %d algo 0x%x line %d",
-				     (int)n, (unsigned int)ciph_cases[n].algo,
-				     (int)ciph_cases[n].line);
+				     (int)n, (unsigned int)cases[n].algo,
+				     (int)cases[n].line);
 
 		key_attr.attributeID = TEE_ATTR_SECRET_VALUE;
-		key_attr.content.ref.buffer = (void *)ciph_cases[n].key1;
-		key_attr.content.ref.length = ciph_cases[n].key1_len;
+		key_attr.content.ref.buffer = (void *)cases[n].key1;
+		key_attr.content.ref.length = cases[n].key1_len;
 
 		key_size = key_attr.content.ref.length * 8;
-		if (ciph_cases[n].key_type == TEE_TYPE_DES ||
-		    ciph_cases[n].key_type == TEE_TYPE_DES3)
+		if (cases[n].key_type == TEE_TYPE_DES ||
+		    cases[n].key_type == TEE_TYPE_DES3)
 			/* Exclude parity in bit size of key */
 			key_size -= key_size / 8;
 
 		op_key_size = key_size;
-		if (ciph_cases[n].key2 != NULL)
+		if (cases[n].key2 != NULL)
 			op_key_size *= 2;
 
 		if (!ADBG_EXPECT_TEEC_SUCCESS(c,
 			ta_crypt_cmd_allocate_operation(c, &session, &op,
-				ciph_cases[n].algo, ciph_cases[n].mode,
+				cases[n].algo, cases[n].mode,
 				op_key_size)))
 			goto out;
 
 		if (!ADBG_EXPECT_TEEC_SUCCESS(c,
 			ta_crypt_cmd_allocate_operation(c, &session, &op2,
-				ciph_cases[n].algo, ciph_cases[n].mode,
+				cases[n].algo, cases[n].mode,
 				op_key_size)))
 			goto out;
 
 		if (!ADBG_EXPECT_TEEC_SUCCESS(c,
 			ta_crypt_cmd_allocate_transient_object(c, &session,
-				ciph_cases[n].key_type, key_size,
+				cases[n].key_type, key_size,
 				&key1_handle)))
 			goto out;
 
@@ -2677,14 +2684,14 @@ static void xtest_tee_test_4003(ADBG_Case_t *c)
 				key1_handle, &key_attr, 1)))
 			goto out;
 
-		if (ciph_cases[n].key2 != NULL) {
+		if (cases[n].key2 != NULL) {
 			key_attr.content.ref.buffer =
-				(void *)ciph_cases[n].key2;
-			key_attr.content.ref.length = ciph_cases[n].key2_len;
+				(void *)cases[n].key2;
+			key_attr.content.ref.length = cases[n].key2_len;
 
 			if (!ADBG_EXPECT_TEEC_SUCCESS(c,
 				ta_crypt_cmd_allocate_transient_object(c,
-					&session, ciph_cases[n].key_type,
+					&session, cases[n].key_type,
 					key_attr.content.ref.length * 8,
 					&key2_handle)))
 				goto out;
@@ -2719,7 +2726,7 @@ static void xtest_tee_test_4003(ADBG_Case_t *c)
 
 		if (!ADBG_EXPECT_TEEC_SUCCESS(c,
 			ta_crypt_cmd_cipher_init(c, &session, op,
-				ciph_cases[n].iv, ciph_cases[n].iv_len)))
+				cases[n].iv, cases[n].iv_len)))
 			goto out;
 
 		out_offs = 0;
@@ -2727,13 +2734,13 @@ static void xtest_tee_test_4003(ADBG_Case_t *c)
 		memset(out, 0, sizeof(out));
 		if (!ADBG_EXPECT_TEEC_SUCCESS(c,
 			ta_crypt_cmd_cipher_update(c, &session, op,
-				ciph_cases[n].in, ciph_cases[n].in_incr, out,
+				cases[n].in, cases[n].in_incr, out,
 				&out_size)))
 			goto out;
 
-		if (ciph_cases[n].algo == TEE_ALG_AES_CTR)
+		if (cases[n].algo == TEE_ALG_AES_CTR)
 			ADBG_EXPECT_COMPARE_UNSIGNED(c, out_size, ==,
-				ciph_cases[n].in_incr);
+				cases[n].in_incr);
 
 		if (!ADBG_EXPECT_TEEC_SUCCESS(c,
 			ta_crypt_cmd_copy_operation(c, &session, op2, op)))
@@ -2745,31 +2752,31 @@ static void xtest_tee_test_4003(ADBG_Case_t *c)
 
 		if (!ADBG_EXPECT_TEEC_SUCCESS(c,
 			ta_crypt_cmd_cipher_do_final(c, &session, op,
-				ciph_cases[n].in + ciph_cases[n].in_incr,
-				ciph_cases[n].in_len - ciph_cases[n].in_incr,
+				cases[n].in + cases[n].in_incr,
+				cases[n].in_len - cases[n].in_incr,
 				out + out_offs,
 				&out_size)))
 			goto out;
 
 		out_offs += out_size;
 
-		(void)ADBG_EXPECT_BUFFER(c, ciph_cases[n].out,
-					 ciph_cases[n].out_len, out, out_offs);
+		(void)ADBG_EXPECT_BUFFER(c, cases[n].out,
+					 cases[n].out_len, out, out_offs);
 
 		/* test on the copied op2 */
 		out_size = sizeof(out) - out_offs2;
 
 		if (!ADBG_EXPECT_TEEC_SUCCESS(c,
 			ta_crypt_cmd_cipher_do_final(c, &session, op2,
-				ciph_cases[n].in + ciph_cases[n].in_incr,
-				ciph_cases[n].in_len - ciph_cases[n].in_incr,
+				cases[n].in + cases[n].in_incr,
+				cases[n].in_len - cases[n].in_incr,
 				out + out_offs2,
 				&out_size)))
 			goto out;
 
 		out_offs2 += out_size;
 
-		ADBG_EXPECT_BUFFER(c, ciph_cases[n].out, ciph_cases[n].out_len,
+		ADBG_EXPECT_BUFFER(c, cases[n].out, cases[n].out_len,
 				   out, out_offs2);
 
 		if (!ADBG_EXPECT_TEEC_SUCCESS(c,
@@ -2784,6 +2791,10 @@ static void xtest_tee_test_4003(ADBG_Case_t *c)
 	}
 out:
 	TEEC_CloseSession(&session);
+}
+static void xtest_tee_test_4003(ADBG_Case_t *c)
+{
+	xtest_cipher_cases(c, ciph_cases, ARRAY_SIZE(ciph_cases));
 }
 ADBG_CASE_DEFINE(regression, 4003, xtest_tee_test_4003,
 		"Test TEE Internal API cipher operations");
